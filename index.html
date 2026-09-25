@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Divide and Conquer Algorithms &mdash; Animated Demos</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+           background: #fff; color: #1f2937; display: flex; justify-content: center; padding: 40px 20px; }
+    .wrap { max-width: 760px; width: 100%; }
+    h1 { font-family: Georgia, 'Times New Roman', serif; font-size: 30px; margin-bottom: 6px; }
+    .sub { color: #6b7280; font-style: italic; margin-bottom: 8px; }
+    .course { color: #6b7280; font-size: 14px; margin-bottom: 30px; }
+    h2 { font-family: Georgia, serif; font-size: 20px; margin: 34px 0 6px; }
+    .note { color: #6b7280; font-size: 14px; margin-bottom: 14px; line-height: 1.5; }
+    ul { list-style: none; }
+    li { margin: 0; border-top: 1px solid #e5e7eb; }
+    li:last-child { border-bottom: 1px solid #e5e7eb; }
+    a.item { display: flex; align-items: baseline; gap: 12px; padding: 12px 6px;
+             text-decoration: none; color: #1f2937; transition: background 0.15s; }
+    a.item:hover { background: #f3f4f6; }
+    .tag { color: #3b82f6; font-weight: 700; font-family: Georgia, serif; min-width: 42px; }
+    .name { font-weight: 600; }
+    .desc { color: #6b7280; font-size: 14px; margin-left: 6px; }
+    .keys { margin-top: 34px; padding: 14px 16px; background: #f9fafb; border: 1px solid #e5e7eb;
+            border-radius: 6px; font-size: 14px; color: #4b5563; line-height: 1.7; }
+    kbd { background: #fff; border: 1px solid #d1d5db; border-bottom-width: 2px; border-radius: 4px;
+          padding: 1px 6px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+    footer { margin-top: 36px; font-size: 13px; color: #9ca3af; line-height: 1.6; }
+    footer a { color: #6b7280; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Divide and Conquer Algorithms</h1>
+  <p class="sub">Animated demonstrations of policy function monotonicity and concavity</p>
+  <p class="course">Quantitative Macroeconomics B (ECO 5022) &middot; Young In Lee &middot; Hokkaido University</p>
+
+  <h2>Gordon and Qiu (2018) &mdash; grids of 20</h2>
+  <p class="note">The <em>nojmax</em> versions drop the upper bound <em>j</em><sub>max</sub>(<em>i</em>) that
+     keeps consumption positive, so the whole grid is available at every state.</p>
+  <ul>
+    <li><a class="item" href="binary_monotonicity_n20_nojmax.html">
+        <span class="tag">1-i</span><span><span class="name">Binary monotonicity</span>
+        <span class="desc">without j<sub>max</sub></span></span></a></li>
+    <li><a class="item" href="binary_monotonicity_n20.html">
+        <span class="tag">1-ii</span><span><span class="name">Binary monotonicity</span>
+        <span class="desc">with j<sub>max</sub></span></span></a></li>
+    <li><a class="item" href="binary_monotonicity_concavity_nojmax_n20.html">
+        <span class="tag">1-iii</span><span><span class="name">Binary monotonicity + binary concavity</span>
+        <span class="desc">without j<sub>max</sub></span></span></a></li>
+    <li><a class="item" href="binary_monotonicity_concavity_n20.html">
+        <span class="tag">1-iv</span><span><span class="name">Binary monotonicity + binary concavity</span>
+        <span class="desc">with j<sub>max</sub></span></span></a></li>
+    <li><a class="item" href="five_steps_animation.html">
+        <span class="tag">1-v</span><span><span class="name">Two-state binary monotonicity</span>
+        <span class="desc">N<sub>k</sub> = 20, N<sub>z</sub> = 5</span></span></a></li>
+  </ul>
+
+  <h2>Gordon and Qiu (2018) &mdash; grids of 100</h2>
+  <p class="note">Larger grids show where the savings come from. The speed slider controls the animation.</p>
+  <ul>
+    <li><a class="item" href="binary_monotonicity_nojmax_n100.html">
+        <span class="tag">2-i</span><span><span class="name">Binary monotonicity</span>
+        <span class="desc">without j<sub>max</sub></span></span></a></li>
+    <li><a class="item" href="binary_monotonicity_n100.html">
+        <span class="tag">2-ii</span><span><span class="name">Binary monotonicity</span>
+        <span class="desc">with j<sub>max</sub></span></span></a></li>
+    <li><a class="item" href="binary_monotonicity_concavity_nojmax_n100.html">
+        <span class="tag">2-iii</span><span><span class="name">Binary monotonicity + binary concavity</span>
+        <span class="desc">without j<sub>max</sub></span></span></a></li>
+    <li><a class="item" href="binary_monotonicity_concavity_n100.html">
+        <span class="tag">2-iv</span><span><span class="name">Binary monotonicity + binary concavity</span>
+        <span class="desc">with j<sub>max</sub></span></span></a></li>
+  </ul>
+
+  <h2>Gordon (2019) &mdash; taste shocks</h2>
+  <p class="note">With taste shocks the policy is a probability. Only the choices with
+     P(<em>i&prime;</em>|<em>i</em>) above machine epsilon have to be evaluated, and the same two
+     properties locate that band. The two-period example of the paper,
+     U(<em>i</em>,<em>i&prime;</em>) = log(<em>b<sub>i</sub></em> &minus; <em>b<sub>i&prime;</sub></em>/2) + log(<em>b<sub>i&prime;</sub></em>).</p>
+  <ul>
+    <li><a class="item" href="binary_monotonicity_tasteshocks_n100.html">
+        <span class="tag">3-i</span><span><span class="name">Binary monotonicity with taste shocks</span>
+        <span class="desc">n = 100, &sigma; = 0.01 and 0.0001, as in Figure 1 of the paper</span></span></a></li>
+    <li><a class="item" href="binary_monotonicity_concavity_tasteshocks_n20.html">
+        <span class="tag">3-ii</span><span><span class="name">Monotonicity + concavity with taste shocks</span>
+        <span class="desc">n = 20, &sigma; on a slider</span></span></a></li>
+  </ul>
+
+  <div class="keys">
+    <strong>Controls</strong><br>
+    <kbd>Space</kbd> play or pause &nbsp;&middot;&nbsp;
+    <kbd>&larr;</kbd> <kbd>&rarr;</kbd> one step &nbsp;&middot;&nbsp;
+    <kbd>R</kbd> replay from the start<br>
+    Everything runs in the browser, so the pages also work offline once saved.
+  </div>
+
+  <footer>
+    Gordon, Grey and Shi Qiu (2018), &ldquo;A divide and conquer algorithm for exploiting policy function
+    monotonicity,&rdquo; <em>Quantitative Economics</em> 9(2), 521&ndash;540.<br>
+    Gordon, Grey (2019), &ldquo;Efficient Computation with Taste Shocks,&rdquo;
+    <em>FRB Richmond Working Paper</em> 19-15.<br><br>
+    Source: <a href="https://github.com/younginleejp/binary_monotonicity">github.com/younginleejp/binary_monotonicity</a>
+  </footer>
+
+</div>
+</body>
+</html>
