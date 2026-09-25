@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BM + BC (n=100) - Gordon & Qiu (2018)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: white; display: flex; justify-content: center; padding: 20px; }
+    .container { display: flex; flex-direction: column; align-items: center; }
+    .title { font-size: 24px; font-weight: bold; margin-bottom: 10px; font-family: Georgia, 'Times New Roman', serif; }
+    .subtitle { font-size: 14px; color: #666; margin-bottom: 15px; font-style: italic; }
+    canvas { border: 1px solid #e5e7eb; border-radius: 4px; }
+    .legend { display: flex; gap: 12px; margin-top: 15px; font-size: 12px; flex-wrap: wrap; justify-content: center; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-circle { width: 14px; height: 14px; border-radius: 50%; }
+    .controls { display: flex; gap: 12px; margin-top: 20px; }
+    .btn { padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 600; transition: all 0.2s; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-gray { background: #6b7280; color: white; }
+    .btn-blue { background: #3b82f6; color: white; }
+    .btn-yellow { background: #f59e0b; color: white; }
+    .btn-green { background: #22c55e; color: white; }
+    .speed-control { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 14px; }
+    .speed-control input { width: 120px; }
+    .status { margin-top: 15px; text-align: center; min-height: 70px; max-width: 600px; }
+    .status-step { font-weight: 600; font-size: 15px; color: #333; }
+    .status-detail { color: #666; font-size: 13px; margin-top: 5px; line-height: 1.4; }
+    .status-waiting { color: #888; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="title">BM + BC (n = n' = 100)</h1>
+    <p class="subtitle">Binary Monotonicity + Binary Concavity — Gordon & Qiu (2018)</p>
+    <canvas id="canvas"></canvas>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-circle" style="background: #e5e7eb;"></div><span>Feasible</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: #fef9c3; border: 1px solid #fcd34d;"></div><span>BM (prev)</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: #fef3c7; border: 2px solid #f59e0b;"></div><span>BM (current)</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: #bbf7d0; border: 2px solid #22c55e;"></div><span>BC evaluated</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: #ef4444;"></div><span>j<sub>max</sub></span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: #3b82f6;"></div><span>Prev g(i)</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: #22c55e;"></div><span>Current g(i)</span></div>
+    </div>
+    <div class="controls">
+      <button class="btn btn-gray" id="btnStepBack">◀ Step</button>
+      <button class="btn btn-blue" id="btnPlay">▶ Play</button>
+      <button class="btn btn-gray" id="btnStepForward">Step ▶</button>
+      <button class="btn btn-green" id="btnReplay">↺ Replay</button>
+    </div>
+    <div class="speed-control">
+      <span>Speed:</span>
+      <input type="range" id="speedSlider" min="20" max="500" value="100">
+      <span id="speedLabel">100ms</span>
+    </div>
+    <div class="status" id="status"><p class="status-waiting">Press Play to start animation</p></div>
+  </div>
+
+  <script>
+    const n = 100;
+    const cellSize = 6;
+    const padding = 50;
+    const width = n * cellSize + padding * 2;
+    const height = n * cellSize + padding * 2;
+    
+    const canvas = document.getElementById('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    
+    const computeJmax = (i) => Math.min(n, Math.floor(0.6 * i + 20));
+    
+    const optimalChoices = [], jmaxValues = [];
+    for (let i = 1; i <= n; i++) {
+      jmaxValues.push(computeJmax(i));
+    }
+    for (let i = 1; i <= n; i++) {
+      // Optimal must respect jmax constraint
+      const rawOptimal = Math.max(1, Math.floor(0.8 * i + 5));
+      optimalChoices.push(Math.min(rawOptimal, jmaxValues[i-1]));
+    }
+    
+    function binarySearchEvaluated(left, right, optimal) {
+      const evaluated = [];
+      let l = left, r = right;
+      
+      if (r - l <= 2) {
+        for (let j = l; j <= r; j++) evaluated.push(j);
+        return evaluated;
+      }
+      
+      while (r - l > 2) {
+        const mid = Math.floor((l + r) / 2);
+        evaluated.push(mid, mid + 1);
+        if (optimal > mid) {
+          l = mid + 1;
+        } else {
+          r = mid;
+        }
+      }
+      for (let j = l; j <= r; j++) {
+        if (!evaluated.includes(j)) evaluated.push(j);
+      }
+      return evaluated;
+    }
+    
+    function generateHistory() {
+      const history = [];
+      const solved = new Array(n).fill(false);
+      const gValues = new Array(n).fill(0);
+      const allBmBounds = [];
+      const allBcEvaluated = [];
+      
+      const g1 = optimalChoices[0];
+      const bc1 = binarySearchEvaluated(1, jmaxValues[0], g1);
+      gValues[0] = g1; solved[0] = true;
+      allBmBounds.push({i: 1, lower: 1, upper: jmaxValues[0]});
+      allBcEvaluated.push({i: 1, points: bc1});
+      history.push({ 
+        i: 1, j: g1, lower: 1, upper: jmaxValues[0], 
+        bcEvaluated: bc1,
+        solved: [...solved], gValues: [...gValues],
+        allBmBounds: JSON.parse(JSON.stringify(allBmBounds)),
+        allBcEvaluated: JSON.parse(JSON.stringify(allBcEvaluated))
+      });
+      
+      const gn = optimalChoices[n - 1];
+      const upperN = Math.min(jmaxValues[n-1], n);
+      const bcn = binarySearchEvaluated(g1, upperN, gn);
+      gValues[n - 1] = gn; solved[n - 1] = true;
+      allBmBounds.push({i: n, lower: g1, upper: upperN});
+      allBcEvaluated.push({i: n, points: bcn});
+      history.push({ 
+        i: n, j: gn, lower: g1, upper: upperN, 
+        bcEvaluated: bcn,
+        solved: [...solved], gValues: [...gValues],
+        allBmBounds: JSON.parse(JSON.stringify(allBmBounds)),
+        allBcEvaluated: JSON.parse(JSON.stringify(allBcEvaluated))
+      });
+      
+      const stack = [[0, n - 1]];
+      while (stack.length > 0) {
+        const [iLow, iHigh] = stack.pop();
+        if (iHigh - iLow <= 1) continue;
+        const iMid = Math.floor((iLow + iHigh) / 2);
+        const gMid = optimalChoices[iMid];
+        const lower = gValues[iLow];
+        const upper = Math.min(gValues[iHigh], jmaxValues[iMid]);
+        const bcMid = binarySearchEvaluated(lower, upper, gMid);
+        gValues[iMid] = gMid; solved[iMid] = true;
+        allBmBounds.push({i: iMid + 1, lower, upper});
+        allBcEvaluated.push({i: iMid + 1, points: bcMid});
+        history.push({ 
+          i: iMid + 1, j: gMid, lower, upper, 
+          bcEvaluated: bcMid,
+          solved: [...solved], gValues: [...gValues],
+          allBmBounds: JSON.parse(JSON.stringify(allBmBounds)),
+          allBcEvaluated: JSON.parse(JSON.stringify(allBcEvaluated))
+        });
+        stack.push([iLow, iMid]); stack.push([iMid, iHigh]);
+      }
+      return history;
+    }
+    
+    const history = generateHistory();
+    let currentStep = -1, isPlaying = false, playTimer = null, playSpeed = 100;
+    
+    document.getElementById('speedSlider').addEventListener('input', (e) => {
+      playSpeed = parseInt(e.target.value);
+      document.getElementById('speedLabel').textContent = playSpeed + 'ms';
+    });
+    
+    function drawCircle(x, y, radius, fill, stroke, strokeWidth) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+      if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = strokeWidth; ctx.stroke(); }
+    }
+    
+    function render() {
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, width, height);
+      const data = currentStep >= 0 ? history[currentStep] : null;
+      const radius = 2.5;
+      
+      // Layer 1: Feasible region (light gray)
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < jmaxValues[i]; j++) {
+          const x = padding + i * cellSize + cellSize / 2;
+          const y = height - padding - j * cellSize - cellSize / 2;
+          drawCircle(x, y, radius - 0.5, '#f0f0f0', '#e0e0e0', 0.3);
+        }
+      }
+      
+      // Layer 2: jmax line (red)
+      for (let i = 0; i < n; i++) {
+        const x = padding + i * cellSize + cellSize / 2;
+        const y = height - padding - (jmaxValues[i] - 1) * cellSize - cellSize / 2;
+        drawCircle(x, y, radius, '#ef4444', '#dc2626', 0.5);
+      }
+      
+      if (data) {
+        // Layer 3: All BM bounds (yellow, accumulated)
+        for (let b = 0; b < data.allBmBounds.length; b++) {
+          const bm = data.allBmBounds[b];
+          const isCurrent = (b === data.allBmBounds.length - 1);
+          for (let j = bm.lower; j <= bm.upper; j++) {
+            const x = padding + (bm.i - 1) * cellSize + cellSize / 2;
+            const y = height - padding - (j - 1) * cellSize - cellSize / 2;
+            if (isCurrent) {
+              drawCircle(x, y, radius + 0.5, '#fef3c7', '#f59e0b', 1);
+            } else {
+              drawCircle(x, y, radius, '#fef9c3', '#fcd34d', 0.5);
+            }
+          }
+        }
+        
+        // Layer 4: All BC evaluated points (green, accumulated)
+        for (let b = 0; b < data.allBcEvaluated.length; b++) {
+          const bc = data.allBcEvaluated[b];
+          const isCurrent = (b === data.allBcEvaluated.length - 1);
+          for (const j of bc.points) {
+            const x = padding + (bc.i - 1) * cellSize + cellSize / 2;
+            const y = height - padding - (j - 1) * cellSize - cellSize / 2;
+            if (isCurrent) {
+              drawCircle(x, y, radius, '#bbf7d0', '#22c55e', 1);
+            } else {
+              drawCircle(x, y, radius - 0.5, '#dcfce7', '#86efac', 0.5);
+            }
+          }
+        }
+        
+        // Layer 5: Previous optimal points (blue)
+        for (let i = 0; i < n; i++) {
+          if (data.solved[i] && i !== data.i - 1) {
+            const x = padding + i * cellSize + cellSize / 2;
+            const y = height - padding - (data.gValues[i] - 1) * cellSize - cellSize / 2;
+            drawCircle(x, y, radius, '#3b82f6', '#1d4ed8', 0.5);
+          }
+        }
+        
+        // Layer 6: Current optimal (green)
+        const x = padding + (data.i - 1) * cellSize + cellSize / 2;
+        const y = height - padding - (data.j - 1) * cellSize - cellSize / 2;
+        drawCircle(x, y, radius + 1.5, '#22c55e', '#15803d', 1);
+      }
+      
+      // Axes
+      ctx.fillStyle = '#333';
+      ctx.font = 'italic 18px Georgia, serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText('i', width / 2, height - 12);
+      ctx.save();
+      ctx.translate(15, height / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText("i'", 0, 0);
+      ctx.restore();
+      
+      updateStatus();
+    }
+    
+    function updateStatus() {
+      const statusEl = document.getElementById('status');
+      if (currentStep < 0) {
+        statusEl.innerHTML = '<p class="status-waiting">Press Play to start animation</p>';
+      } else {
+        const data = history[currentStep];
+        const bmSize = data.upper - data.lower + 1;
+        const bcSize = data.bcEvaluated.length;
+        statusEl.innerHTML = `<p class="status-step">Step ${currentStep + 1} / ${history.length}: Solving g(${data.i})</p>
+          <p class="status-detail">BM bounds: [${data.lower}, ${data.upper}] (${bmSize} points) | BC evaluated: ${bcSize} points → g(${data.i}) = ${data.j}</p>`;
+      }
+    }
+    
+    function updateButtons() {
+      document.getElementById('btnStepBack').disabled = currentStep <= 0;
+      document.getElementById('btnStepForward').disabled = currentStep >= history.length - 1;
+      document.getElementById('btnPlay').textContent = isPlaying ? '⏸ Pause' : '▶ Play';
+      document.getElementById('btnPlay').className = isPlaying ? 'btn btn-yellow' : 'btn btn-blue';
+    }
+    
+    function play() {
+      if (currentStep >= history.length - 1) currentStep = -1;
+      isPlaying = true;
+      if (currentStep < 0) currentStep = 0;
+      render(); updateButtons();
+      playTimer = setInterval(() => {
+        if (currentStep < history.length - 1) { currentStep++; render(); updateButtons(); }
+        else pause();
+      }, playSpeed);
+    }
+    
+    function pause() { isPlaying = false; if (playTimer) { clearInterval(playTimer); playTimer = null; } updateButtons(); }
+    function stepBack() { if (currentStep > 0) { currentStep--; render(); updateButtons(); } }
+    function stepForward() { if (currentStep < history.length - 1) { currentStep++; render(); updateButtons(); } }
+    function replay() { pause(); currentStep = -1; setTimeout(play, 100); }
+    
+    document.getElementById('btnPlay').addEventListener('click', () => { isPlaying ? pause() : play(); });
+    document.getElementById('btnStepBack').addEventListener('click', stepBack);
+    document.getElementById('btnStepForward').addEventListener('click', stepForward);
+    document.getElementById('btnReplay').addEventListener('click', replay);
+    
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') { e.preventDefault(); isPlaying ? pause() : play(); }
+      else if (e.code === 'ArrowLeft') stepBack();
+      else if (e.code === 'ArrowRight') stepForward();
+      else if (e.code === 'KeyR') replay();
+    });
+    
+    render(); updateButtons();
+  </script>
+</body>
+</html>

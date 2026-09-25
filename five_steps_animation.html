@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>5 Steps: From Brute Force to Two-State BM</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .title { font-size: 24px; font-weight: bold; text-align: center; margin-bottom: 5px; }
+    .subtitle { font-size: 14px; color: #666; text-align: center; margin-bottom: 15px; }
+    
+    .step-selector { display: flex; gap: 8px; justify-content: center; margin-bottom: 15px; flex-wrap: wrap; }
+    .step-btn { padding: 10px 16px; border: 2px solid #ddd; border-radius: 8px; cursor: pointer; 
+                font-size: 13px; font-weight: 600; background: white; transition: all 0.2s; }
+    .step-btn:hover { border-color: #3b82f6; }
+    .step-btn.active { background: #3b82f6; color: white; border-color: #3b82f6; }
+    
+    .canvas-container { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
+    canvas { border: 1px solid #ddd; border-radius: 4px; background: white; }
+    
+    .legend { display: flex; gap: 15px; justify-content: center; margin-top: 15px; font-size: 12px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-circle { width: 14px; height: 14px; border-radius: 50%; }
+    .legend-square { width: 14px; height: 14px; }
+    
+    .controls { display: flex; gap: 12px; justify-content: center; margin-top: 15px; }
+    .btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-blue { background: #3b82f6; color: white; }
+    .btn-gray { background: #6b7280; color: white; }
+    .btn-green { background: #22c55e; color: white; }
+    
+    .status { margin-top: 15px; text-align: center; min-height: 60px; }
+    .status-step { font-weight: 600; font-size: 15px; color: #333; }
+    .status-detail { color: #666; font-size: 13px; margin-top: 5px; }
+    
+    .stats-table { margin: 20px auto; border-collapse: collapse; font-size: 13px; }
+    .stats-table th, .stats-table td { padding: 8px 15px; border: 1px solid #ddd; text-align: center; }
+    .stats-table th { background: #f0f0f0; }
+    .stats-table .highlight { background: #fef3c3; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="title">Search Acceleration: 5 Steps</h1>
+    <p class="subtitle">From Brute Force to Two-State Binary Monotonicity — Gordon & Qiu (2018)</p>
+    
+    <div class="step-selector">
+      <button class="step-btn active" data-step="1">Step 1: Brute Force</button>
+      <button class="step-btn" data-step="2">Step 2: Simple Mono</button>
+      <button class="step-btn" data-step="3">Step 3: Binary Mono</button>
+      <button class="step-btn" data-step="4">Step 4: BM + BC</button>
+      <button class="step-btn" data-step="5">Step 5: Two-State BM</button>
+    </div>
+    
+    <div class="canvas-container" id="canvasContainer">
+      <canvas id="canvas1"></canvas>
+    </div>
+    
+    <div class="legend" id="legend"></div>
+    
+    <div class="controls">
+      <button class="btn btn-gray" id="btnStepBack">◀ Back</button>
+      <button class="btn btn-blue" id="btnPlay">▶ Play</button>
+      <button class="btn btn-gray" id="btnStepForward">Step ▶</button>
+      <button class="btn btn-green" id="btnReplay">↺ Replay</button>
+    </div>
+    
+    <div class="status" id="status">
+      <div class="status-step">Select a step to begin</div>
+    </div>
+    
+    <table class="stats-table" id="statsTable">
+      <tr>
+        <th>Method</th>
+        <th>Evaluations</th>
+        <th>Per State</th>
+        <th>Speedup</th>
+      </tr>
+    </table>
+  </div>
+
+<script>
+const n = 20;       // Grid size for k
+const nz = 5;       // Number of z levels
+const cellSize = 24;
+const padding = 40;
+
+// Canvas dimensions
+const singleWidth = n * cellSize + padding * 2;
+const singleHeight = n * cellSize + padding * 2;
+
+// Colors
+const colors = {
+  background: '#f0f0f0',
+  searchPrev: '#fef9c3',
+  searchCurrent: '#fef3c7',
+  searchCurrentBorder: '#f59e0b',
+  jmax: '#ef4444',
+  optimalPrev: '#3b82f6',
+  optimalCurrent: '#22c55e',
+  boundFromZ: '#059669',  // Green for z-bounds in Step 5
+  phase1: '#3b82f6',      // Blue - z=1
+  phase2: '#f59e0b',      // Orange - z=Nz
+  phase3: '#22c55e'       // Green - middle z
+};
+
+// Simulated data
+const jmaxValues = [];
+const optimalChoices = [];
+
+// Generate jmax for each z level (higher z = higher jmax)
+for (let iz = 0; iz < nz; iz++) {
+  jmaxValues[iz] = [];
+  optimalChoices[iz] = [];
+  const zFactor = 0.6 + 0.1 * iz;  // z=1: 0.6, z=5: 1.0
+  for (let i = 1; i <= n; i++) {
+    jmaxValues[iz].push(Math.min(n, Math.floor(zFactor * i + 6 + iz)));
+    const rawOpt = Math.max(1, Math.floor((0.7 + 0.05*iz) * i + 1 + iz*0.5));
+    optimalChoices[iz].push(Math.min(rawOpt, jmaxValues[iz][i-1]));
+  }
+}
+
+// Middle z for steps 1-4
+const midZ = Math.floor(nz / 2);
+
+// Current state
+let currentStep = 1;
+let currentPhase = 0;
+let isPlaying = false;
+let playInterval = null;
+let histories = {};
+
+// Generate histories for each step
+function generateHistories() {
+  // Step 1: Brute Force (single z)
+  histories[1] = [];
+  for (let i = 1; i <= n; i++) {
+    histories[1].push({
+      i, 
+      j: optimalChoices[midZ][i-1],
+      lower: 1,
+      upper: jmaxValues[midZ][i-1],
+      iz: midZ
+    });
+  }
+  
+  // Step 2: Simple Monotonicity (single z)
+  histories[2] = [];
+  let lowerBound = 1;
+  for (let i = 1; i <= n; i++) {
+    const opt = optimalChoices[midZ][i-1];
+    histories[2].push({
+      i,
+      j: opt,
+      lower: lowerBound,
+      upper: jmaxValues[midZ][i-1],
+      iz: midZ
+    });
+    lowerBound = opt;
+  }
+  
+  // Step 3: Binary Monotonicity (single z)
+  histories[3] = generateBinaryMonoHistory(midZ);
+  
+  // Step 4: BM + BC (single z)
+  histories[4] = generateBMBCHistory(midZ);
+  
+  // Step 5: Two-State BM (all z levels)
+  histories[5] = generateTwoStateHistory();
+}
+
+function generateBinaryMonoHistory(iz) {
+  const history = [];
+  const solved = new Array(n + 1).fill(false);
+  const gValues = new Array(n + 1).fill(0);
+  
+  // g(1)
+  gValues[1] = optimalChoices[iz][0];
+  solved[1] = true;
+  history.push({ i: 1, j: gValues[1], lower: 1, upper: jmaxValues[iz][0], iz });
+  
+  // g(n)
+  gValues[n] = optimalChoices[iz][n-1];
+  solved[n] = true;
+  history.push({ i: n, j: gValues[n], lower: gValues[1], upper: jmaxValues[iz][n-1], iz });
+  
+  // Divide and conquer
+  const stack = [[1, n]];
+  while (stack.length > 0) {
+    const [lo, hi] = stack.pop();
+    if (hi - lo <= 1) continue;
+    const mid = Math.floor((lo + hi) / 2);
+    const lower = gValues[lo];
+    const upper = Math.min(gValues[hi], jmaxValues[iz][mid-1]);
+    gValues[mid] = optimalChoices[iz][mid-1];
+    solved[mid] = true;
+    history.push({ i: mid, j: gValues[mid], lower, upper, iz });
+    stack.push([lo, mid]);
+    stack.push([mid, hi]);
+  }
+  
+  return history;
+}
+
+function generateBMBCHistory(iz) {
+  const history = [];
+  const gValues = new Array(n + 1).fill(0);
+  
+  // g(1) with binary search
+  gValues[1] = optimalChoices[iz][0];
+  history.push({ 
+    i: 1, j: gValues[1], 
+    lower: 1, upper: jmaxValues[iz][0],
+    bcEvaluated: binarySearchEvaluated(1, jmaxValues[iz][0], gValues[1]),
+    iz
+  });
+  
+  // g(n)
+  gValues[n] = optimalChoices[iz][n-1];
+  history.push({ 
+    i: n, j: gValues[n], 
+    lower: gValues[1], upper: jmaxValues[iz][n-1],
+    bcEvaluated: binarySearchEvaluated(gValues[1], jmaxValues[iz][n-1], gValues[n]),
+    iz
+  });
+  
+  // Divide and conquer
+  const stack = [[1, n]];
+  while (stack.length > 0) {
+    const [lo, hi] = stack.pop();
+    if (hi - lo <= 1) continue;
+    const mid = Math.floor((lo + hi) / 2);
+    const lower = gValues[lo];
+    const upper = Math.min(gValues[hi], jmaxValues[iz][mid-1]);
+    gValues[mid] = optimalChoices[iz][mid-1];
+    history.push({ 
+      i: mid, j: gValues[mid], lower, upper,
+      bcEvaluated: binarySearchEvaluated(lower, upper, gValues[mid]),
+      iz
+    });
+    stack.push([lo, mid]);
+    stack.push([mid, hi]);
+  }
+  
+  return history;
+}
+
+function binarySearchEvaluated(left, right, optimal) {
+  const evaluated = [];
+  if (right - left <= 2) {
+    for (let j = left; j <= right; j++) evaluated.push(j);
+    return evaluated;
+  }
+  let l = left, r = right;
+  while (r - l > 2) {
+    const mid = Math.floor((l + r) / 2);
+    evaluated.push(mid, mid + 1);
+    if (optimal > mid) l = mid + 1;
+    else r = mid;
+  }
+  for (let j = l; j <= r; j++) {
+    if (!evaluated.includes(j)) evaluated.push(j);
+  }
+  return evaluated;
+}
+
+function generateTwoStateHistory() {
+  const history = [];
+  const gValues = [];
+  for (let iz = 0; iz < nz; iz++) gValues[iz] = new Array(n + 1).fill(0);
+  
+  // PHASE 1: Solve z = 0 (lowest)
+  let iz = 0;
+  
+  // g(z=0, k=1)
+  gValues[iz][1] = optimalChoices[iz][0];
+  history.push({ 
+    phase: 1, iz, i: 1, j: gValues[iz][1],
+    lower: 1, upper: jmaxValues[iz][0]
+  });
+  
+  // g(z=0, k=n)
+  gValues[iz][n] = optimalChoices[iz][n-1];
+  history.push({ 
+    phase: 1, iz, i: n, j: gValues[iz][n],
+    lower: gValues[iz][1], upper: jmaxValues[iz][n-1]
+  });
+  
+  // Divide and conquer for z=0
+  let stack = [[1, n]];
+  while (stack.length > 0) {
+    const [lo, hi] = stack.pop();
+    if (hi - lo <= 1) continue;
+    const mid = Math.floor((lo + hi) / 2);
+    gValues[iz][mid] = optimalChoices[iz][mid-1];
+    history.push({
+      phase: 1, iz, i: mid, j: gValues[iz][mid],
+      lower: gValues[iz][lo], upper: Math.min(gValues[iz][hi], jmaxValues[iz][mid-1])
+    });
+    stack.push([lo, mid]);
+    stack.push([mid, hi]);
+  }
+  
+  // PHASE 2: Solve z = nz-1 (highest)
+  iz = nz - 1;
+  
+  gValues[iz][1] = optimalChoices[iz][0];
+  history.push({ 
+    phase: 2, iz, i: 1, j: gValues[iz][1],
+    lower: 1, upper: jmaxValues[iz][0]
+  });
+  
+  gValues[iz][n] = optimalChoices[iz][n-1];
+  history.push({ 
+    phase: 2, iz, i: n, j: gValues[iz][n],
+    lower: gValues[iz][1], upper: jmaxValues[iz][n-1]
+  });
+  
+  stack = [[1, n]];
+  while (stack.length > 0) {
+    const [lo, hi] = stack.pop();
+    if (hi - lo <= 1) continue;
+    const mid = Math.floor((lo + hi) / 2);
+    gValues[iz][mid] = optimalChoices[iz][mid-1];
+    history.push({
+      phase: 2, iz, i: mid, j: gValues[iz][mid],
+      lower: gValues[iz][lo], upper: Math.min(gValues[iz][hi], jmaxValues[iz][mid-1])
+    });
+    stack.push([lo, mid]);
+    stack.push([mid, hi]);
+  }
+  
+  // PHASE 3: Solve middle z levels using bounds from z=0 and z=nz-1
+  for (iz = 1; iz < nz - 1; iz++) {
+    for (let i = 1; i <= n; i++) {
+      const j_low = gValues[0][i];
+      const j_high = gValues[nz-1][i];
+      const lower = Math.min(j_low, j_high);
+      const upper = Math.min(Math.max(j_low, j_high), jmaxValues[iz][i-1]);
+      gValues[iz][i] = optimalChoices[iz][i-1];
+      history.push({
+        phase: 3, iz, i, j: gValues[iz][i],
+        lower, upper,
+        boundLow: j_low,
+        boundHigh: j_high
+      });
+    }
+  }
+  
+  return history;
+}
+
+// Drawing functions
+function drawCircle(ctx, x, y, radius, fillColor, strokeColor, lineWidth = 1) {
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  if (fillColor) {
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+  }
+  if (strokeColor) {
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  }
+}
+
+function getCanvasCoords(i, j, offsetX = 0) {
+  return {
+    x: padding + (i - 0.5) * cellSize + offsetX,
+    y: padding + (n - j + 0.5) * cellSize
+  };
+}
+
+function drawSingleZCanvas(ctx, step, currentIdx) {
+  const width = singleWidth;
+  const height = singleHeight;
+  ctx.canvas.width = width;
+  ctx.canvas.height = height;
+  ctx.clearRect(0, 0, width, height);
+  
+  const history = histories[step];
+  const iz = midZ;
+  const radius = cellSize / 2 - 3;
+  
+  // Background grid (feasible region)
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= jmaxValues[iz][i-1]; j++) {
+      const {x, y} = getCanvasCoords(i, j);
+      drawCircle(ctx, x, y, radius, colors.background, '#ddd', 1);
+    }
+  }
+  
+  // Accumulated search regions
+  for (let idx = 0; idx <= currentIdx && idx < history.length; idx++) {
+    const h = history[idx];
+    const isCurrent = (idx === currentIdx);
+    
+    if (step === 4 && h.bcEvaluated) {
+      // BM+BC: show only evaluated points
+      for (const j of h.bcEvaluated) {
+        const {x, y} = getCanvasCoords(h.i, j);
+        if (isCurrent) {
+          drawCircle(ctx, x, y, radius + 1, '#bbf7d0', '#22c55e', 2);
+        } else {
+          drawCircle(ctx, x, y, radius, '#dcfce7', '#86efac', 1);
+        }
+      }
+    } else {
+      // Linear search: show full range
+      for (let j = h.lower; j <= h.upper; j++) {
+        const {x, y} = getCanvasCoords(h.i, j);
+        if (isCurrent) {
+          drawCircle(ctx, x, y, radius + 1, colors.searchCurrent, colors.searchCurrentBorder, 2);
+        } else {
+          drawCircle(ctx, x, y, radius, colors.searchPrev, '#fcd34d', 1);
+        }
+      }
+    }
+  }
+  
+  // jmax line
+  for (let i = 1; i <= n; i++) {
+    const {x, y} = getCanvasCoords(i, jmaxValues[iz][i-1]);
+    drawCircle(ctx, x, y, radius - 1, colors.jmax, colors.jmax, 1);
+  }
+  
+  // Previous optimal choices
+  for (let idx = 0; idx < currentIdx && idx < history.length; idx++) {
+    const h = history[idx];
+    const {x, y} = getCanvasCoords(h.i, h.j);
+    drawCircle(ctx, x, y, radius, colors.optimalPrev, colors.optimalPrev, 1);
+  }
+  
+  // Current optimal
+  if (currentIdx < history.length) {
+    const h = history[currentIdx];
+    const {x, y} = getCanvasCoords(h.i, h.j);
+    drawCircle(ctx, x, y, radius + 2, colors.optimalCurrent, '#15803d', 2);
+  }
+  
+  // Axes labels
+  ctx.fillStyle = '#333';
+  ctx.font = '14px serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('i', width / 2, height - 10);
+  ctx.save();
+  ctx.translate(15, height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("i'", 0, 0);
+  ctx.restore();
+}
+
+function drawTwoStateCanvas() {
+  const container = document.getElementById('canvasContainer');
+  container.innerHTML = '';
+  container.style.display = 'grid';
+  container.style.gridTemplateColumns = 'repeat(3, 1fr)';
+  container.style.gap = '10px';
+  container.style.maxWidth = '750px';
+  container.style.margin = '0 auto';
+  
+  const history = histories[5];
+  const canvases = [];
+  const ctxs = [];
+  
+  // Create canvas for each z level (2x3 grid, 5 panels)
+  for (let iz = 0; iz < nz; iz++) {
+    const canvas = document.createElement('canvas');
+    canvas.width = singleWidth * 0.6;
+    canvas.height = singleHeight * 0.6;
+    canvas.style.border = '1px solid #ddd';
+    canvas.style.borderRadius = '4px';
+    canvas.style.background = 'white';
+    container.appendChild(canvas);
+    canvases.push(canvas);
+    ctxs.push(canvas.getContext('2d'));
+  }
+  
+  // Add empty div for 6th cell (to complete 2x3 grid)
+  const emptyDiv = document.createElement('div');
+  container.appendChild(emptyDiv);
+  
+  return { canvases, ctxs };
+}
+
+function drawTwoStateFrame(ctxs, currentIdx) {
+  const history = histories[5];
+  const scale = 0.6;
+  const radius = (cellSize / 2 - 3) * scale;
+  const smallPadding = padding * scale;
+  const smallCellSize = cellSize * scale;
+  
+  function getSmallCoords(i, j) {
+    return {
+      x: smallPadding + (i - 0.5) * smallCellSize,
+      y: smallPadding + (n - j + 0.5) * smallCellSize
+    };
+  }
+  
+  // Clear all canvases
+  for (let iz = 0; iz < nz; iz++) {
+    const ctx = ctxs[iz];
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    
+    // Background grid
+    for (let i = 1; i <= n; i++) {
+      for (let j = 1; j <= jmaxValues[iz][i-1]; j++) {
+        const {x, y} = getSmallCoords(i, j);
+        drawCircle(ctx, x, y, radius, colors.background, '#ddd', 0.5);
+      }
+    }
+    
+    // jmax
+    for (let i = 1; i <= n; i++) {
+      const {x, y} = getSmallCoords(i, jmaxValues[iz][i-1]);
+      drawCircle(ctx, x, y, radius - 1, colors.jmax, colors.jmax, 0.5);
+    }
+  }
+  
+  // Draw history up to currentIdx
+  for (let idx = 0; idx <= currentIdx && idx < history.length; idx++) {
+    const h = history[idx];
+    const ctx = ctxs[h.iz];
+    const isCurrent = (idx === currentIdx);
+    
+    // Search region
+    for (let j = h.lower; j <= h.upper; j++) {
+      const {x, y} = getSmallCoords(h.i, j);
+      let color, border, lw;
+      if (isCurrent) {
+        if (h.phase === 1) { color = '#bfdbfe'; border = colors.phase1; lw = 2; }
+        else if (h.phase === 2) { color = '#fed7aa'; border = colors.phase2; lw = 2; }
+        else { color = '#bbf7d0'; border = colors.phase3; lw = 2; }
+      } else {
+        if (h.phase === 1) { color = '#dbeafe'; border = '#93c5fd'; lw = 1; }
+        else if (h.phase === 2) { color = '#ffedd5'; border = '#fdba74'; lw = 1; }
+        else { color = '#dcfce7'; border = '#86efac'; lw = 1; }
+      }
+      drawCircle(ctx, x, y, radius + (isCurrent ? 1 : 0), color, border, lw);
+    }
+    
+    // Optimal choice
+    const {x, y} = getSmallCoords(h.i, h.j);
+    if (isCurrent) {
+      drawCircle(ctx, x, y, radius + 2, colors.optimalCurrent, '#15803d', 2);
+    } else {
+      let optColor = colors.optimalPrev;
+      if (h.phase === 1) optColor = colors.phase1;
+      else if (h.phase === 2) optColor = colors.phase2;
+      drawCircle(ctx, x, y, radius, optColor, optColor, 1);
+    }
+  }
+  
+  // Draw bounds for phase 3 (middle z)
+  if (currentIdx < history.length) {
+    const h = history[currentIdx];
+    if (h.phase === 3 && h.boundLow !== undefined) {
+      // Show bounds from z=0 and z=nz-1 on current z canvas
+      const ctx = ctxs[h.iz];
+      const {x: x1, y: y1} = getSmallCoords(h.i, h.boundLow);
+      const {x: x2, y: y2} = getSmallCoords(h.i, h.boundHigh);
+      ctx.strokeStyle = colors.boundFromZ;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x1 - radius - 3, y1);
+      ctx.lineTo(x1 + radius + 3, y1);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x2 - radius - 3, y2);
+      ctx.lineTo(x2 + radius + 3, y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+  
+  // Labels
+  for (let iz = 0; iz < nz; iz++) {
+    const ctx = ctxs[iz];
+    ctx.fillStyle = '#333';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    
+    let label;
+    if (iz === 0) label = 'z₁ (lowest)';
+    else if (iz === nz - 1) label = `z${nz} (highest)`;
+    else label = `z${iz + 1}`;
+    
+    ctx.fillText(label, ctx.canvas.width / 2, 15);
+  }
+}
+
+function updateLegend() {
+  const legend = document.getElementById('legend');
+  if (currentStep <= 4) {
+    legend.innerHTML = `
+      <div class="legend-item"><div class="legend-circle" style="background: ${colors.background}; border: 1px solid #ddd;"></div><span>Feasible</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: ${colors.searchPrev}; border: 1px solid #fcd34d;"></div><span>Searched (prev)</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: ${colors.searchCurrent}; border: 2px solid ${colors.searchCurrentBorder};"></div><span>Searching</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: ${colors.jmax};"></div><span>j<sub>max</sub></span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: ${colors.optimalPrev};"></div><span>Previous g(i)</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: ${colors.optimalCurrent};"></div><span>Current g(i)</span></div>
+    `;
+  } else {
+    legend.innerHTML = `
+      <div class="legend-item"><div class="legend-circle" style="background: #bfdbfe; border: 2px solid ${colors.phase1};"></div><span>Phase 1 (z₁)</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: #fed7aa; border: 2px solid ${colors.phase2};"></div><span>Phase 2 (z${nz})</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: #bbf7d0; border: 2px solid ${colors.phase3};"></div><span>Phase 3 (middle)</span></div>
+      <div class="legend-item"><div class="legend-circle" style="background: ${colors.jmax};"></div><span>j<sub>max</sub></span></div>
+      <div class="legend-item"><div class="legend-square" style="border-top: 2px dashed ${colors.boundFromZ};"></div><span>Bounds from z₁, z${nz}</span></div>
+    `;
+  }
+}
+
+function updateStatus(idx) {
+  const status = document.getElementById('status');
+  const history = histories[currentStep];
+  
+  if (idx >= history.length) {
+    status.innerHTML = `<div class="status-step">✓ Complete!</div>
+      <div class="status-detail">Total: ${history.length} states solved</div>`;
+    return;
+  }
+  
+  const h = history[idx];
+  
+  if (currentStep <= 4) {
+    const searchSize = h.bcEvaluated ? h.bcEvaluated.length : (h.upper - h.lower + 1);
+    status.innerHTML = `
+      <div class="status-step">Step ${idx + 1} / ${history.length}: Solving g(${h.i})</div>
+      <div class="status-detail">Search: [${h.lower}, ${h.upper}] (${searchSize} points) → g(${h.i}) = ${h.j}</div>
+    `;
+  } else {
+    const phaseNames = ['', 'Phase 1: z₁ (lowest)', 'Phase 2: z' + nz + ' (highest)', 'Phase 3: middle z'];
+    status.innerHTML = `
+      <div class="status-step">${phaseNames[h.phase]} — State ${idx + 1} / ${history.length}</div>
+      <div class="status-detail">z=${h.iz + 1}, k=${h.i}: Search [${h.lower}, ${h.upper}] → g = ${h.j}</div>
+    `;
+  }
+}
+
+function calculateStats() {
+  const table = document.getElementById('statsTable');
+  
+  // Calculate evaluations for each step
+  const evals = [0, 0, 0, 0, 0];
+  
+  // Step 1: Brute force
+  for (const h of histories[1]) {
+    evals[0] += h.upper - h.lower + 1;
+  }
+  
+  // Step 2: Simple mono
+  for (const h of histories[2]) {
+    evals[1] += h.upper - h.lower + 1;
+  }
+  
+  // Step 3: Binary mono
+  for (const h of histories[3]) {
+    evals[2] += h.upper - h.lower + 1;
+  }
+  
+  // Step 4: BM+BC
+  for (const h of histories[4]) {
+    evals[3] += h.bcEvaluated ? h.bcEvaluated.length : (h.upper - h.lower + 1);
+  }
+  
+  // Step 5: Two-state BM
+  for (const h of histories[5]) {
+    evals[4] += h.upper - h.lower + 1;
+  }
+  
+  const states1to4 = n;
+  const states5 = n * nz;
+  
+  table.innerHTML = `
+    <tr><th>Method</th><th>Evaluations</th><th>Per State</th><th>Speedup</th></tr>
+    <tr class="${currentStep === 1 ? 'highlight' : ''}">
+      <td>Step 1: Brute Force</td><td>${evals[0]}</td><td>${(evals[0]/states1to4).toFixed(1)}</td><td>1.00x</td>
+    </tr>
+    <tr class="${currentStep === 2 ? 'highlight' : ''}">
+      <td>Step 2: Simple Mono</td><td>${evals[1]}</td><td>${(evals[1]/states1to4).toFixed(1)}</td><td>${(evals[0]/evals[1]).toFixed(2)}x</td>
+    </tr>
+    <tr class="${currentStep === 3 ? 'highlight' : ''}">
+      <td>Step 3: Binary Mono</td><td>${evals[2]}</td><td>${(evals[2]/states1to4).toFixed(1)}</td><td>${(evals[0]/evals[2]).toFixed(2)}x</td>
+    </tr>
+    <tr class="${currentStep === 4 ? 'highlight' : ''}">
+      <td>Step 4: BM + BC</td><td>${evals[3]}</td><td>${(evals[3]/states1to4).toFixed(1)}</td><td>${(evals[0]/evals[3]).toFixed(2)}x</td>
+    </tr>
+    <tr class="${currentStep === 5 ? 'highlight' : ''}">
+      <td>Step 5: Two-State BM</td><td>${evals[4]}</td><td>${(evals[4]/states5).toFixed(1)}</td><td>—</td>
+    </tr>
+  `;
+}
+
+// Main state
+let canvas1, ctx1;
+let twoStateCtxs = null;
+
+function setupCanvas() {
+  const container = document.getElementById('canvasContainer');
+  
+  if (currentStep <= 4) {
+    container.innerHTML = '<canvas id="canvas1"></canvas>';
+    container.style.display = 'flex';
+    container.style.gridTemplateColumns = '';
+    container.style.maxWidth = '';
+    canvas1 = document.getElementById('canvas1');
+    ctx1 = canvas1.getContext('2d');
+    twoStateCtxs = null;
+  } else {
+    const result = drawTwoStateCanvas();
+    twoStateCtxs = result.ctxs;
+    ctx1 = null;
+  }
+}
+
+function render(idx) {
+  if (currentStep <= 4) {
+    drawSingleZCanvas(ctx1, currentStep, idx);
+  } else {
+    drawTwoStateFrame(twoStateCtxs, idx);
+  }
+  updateStatus(idx);
+  calculateStats();
+}
+
+function setStep(step) {
+  stopPlay();
+  currentStep = step;
+  currentPhase = 0;
+  
+  document.querySelectorAll('.step-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.step) === step);
+  });
+  
+  setupCanvas();
+  updateLegend();
+  render(0);
+}
+
+function stepForward() {
+  const history = histories[currentStep];
+  if (currentPhase < history.length - 1) {
+    currentPhase++;
+    render(currentPhase);
+  } else {
+    stopPlay();
+  }
+}
+
+function stepBack() {
+  if (currentPhase > 0) {
+    currentPhase--;
+    render(currentPhase);
+  }
+}
+
+function play() {
+  if (isPlaying) {
+    stopPlay();
+  } else {
+    isPlaying = true;
+    document.getElementById('btnPlay').textContent = '⏸ Pause';
+    const speed = currentStep === 5 ? 150 : 400;
+    playInterval = setInterval(() => {
+      const history = histories[currentStep];
+      if (currentPhase < history.length - 1) {
+        currentPhase++;
+        render(currentPhase);
+      } else {
+        stopPlay();
+      }
+    }, speed);
+  }
+}
+
+function stopPlay() {
+  isPlaying = false;
+  document.getElementById('btnPlay').textContent = '▶ Play';
+  if (playInterval) {
+    clearInterval(playInterval);
+    playInterval = null;
+  }
+}
+
+function replay() {
+  stopPlay();
+  currentPhase = 0;
+  render(0);
+}
+
+// Initialize
+generateHistories();
+
+document.querySelectorAll('.step-btn').forEach(btn => {
+  btn.addEventListener('click', () => setStep(parseInt(btn.dataset.step)));
+});
+
+document.getElementById('btnPlay').addEventListener('click', play);
+document.getElementById('btnStepBack').addEventListener('click', stepBack);
+document.getElementById('btnStepForward').addEventListener('click', stepForward);
+document.getElementById('btnReplay').addEventListener('click', replay);
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); play(); }
+  else if (e.code === 'ArrowRight') stepForward();
+  else if (e.code === 'ArrowLeft') stepBack();
+  else if (e.code === 'KeyR') replay();
+  else if (e.key >= '1' && e.key <= '5') setStep(parseInt(e.key));
+});
+
+setStep(1);
+</script>
+</body>
+</html>
